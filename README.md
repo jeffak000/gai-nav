@@ -4,6 +4,14 @@
 
 > 开源发布版**不携带任何书签数据**，首次打开是空的，由你自己添加。
 
+## 🚀 一键部署
+
+点击按钮，授权 GitHub 仓库后自动部署到 EdgeOne Makers：
+
+[![Deploy to EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?repository-url=https%3A%2F%2Fgithub.com%2Fjeffak000%2Fgai-nav&project-name=gai-nav&env=APP_PASSWORD&env-description=%E8%AE%BE%E7%BD%AE%E7%99%BB%E5%BD%95%E5%AF%86%E7%A0%81%EF%BC%88%E9%BB%98%E8%AE%A4%20admin%EF%BC%89)
+
+部署完成后，控制台会提示你设置环境变量 `APP_PASSWORD`（即登录密码，不设置则默认 `admin`，**请务必修改**）。
+
 ## ✨ 功能特性
 
 - **多分区**：默认「个人区 / 工作区」，可在设置里增删、重命名、拖拽或右键快速分到其他分区。
