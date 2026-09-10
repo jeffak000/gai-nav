@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>书签中心</title>
+<title>gai溜子导航站</title>
 <style>
   :root{ --bg:#111217; --panel:#181a20; --panel2:#20232a; --line:#2a2e37; --tx:#e8eaed; --mut:#8b929d; --acc:#4f8cff; --acc2:#3b6fd4; --danger:#ff5d5d; --ok:#3ecf8e; --work:#ff9f43; }
   *{box-sizing:border-box}
@@ -62,8 +62,6 @@
   .item.drop-after{box-shadow:inset 0 -3px 0 0 var(--acc)}
   .cat.drop-before{border-top:2px solid var(--acc)}
   .cat.drop-after{border-bottom:2px solid var(--acc)}
-  .item img{width:18px;height:18px;flex:none;object-fit:contain;border-radius:3px}
-  .item .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
   .empty{color:var(--mut);padding:30px 0;font-size:13px}
 
   .ctx{position:fixed;min-width:140px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px;box-shadow:0 8px 28px #000a;display:none;z-index:95}
@@ -85,6 +83,8 @@
   .setting>div{flex:1}
   .setting label{font-size:13px;font-weight:500;display:block;margin-bottom:2px}
   .setting small{font-size:11px;color:var(--mut)}
+  .grp-row{display:flex;align-items:center;gap:8px;padding:6px 0}
+  .grp-row .grp-name{flex:1;font-size:13px}
 
   .modal{position:fixed;inset:0;background:#0008;display:none;align-items:center;justify-content:center;z-index:70}
   .modal.show{display:flex}
@@ -109,15 +109,11 @@
 </head>
 <body>
 <header>
-  <h1 id="siteName">🔖 书签中心</h1>
-  <div class="tabs" id="groupTabs">
-    <button data-g="personal" class="active">个人</button>
-    <button data-g="work">工作</button>
-  </div>
+  <h1 id="siteName">🔖 gai溜子导航站</h1>
+  <div class="tabs" id="groupTabs"></div>
   <span class="spacer"></span>
   <button class="ghost" id="btnSettings">设置</button>
   <button class="primary" id="btnAddBm">+ 书签</button>
-  <button class="primary" id="btnLogin">登录</button>
 </header>
 
 <div class="layout">
@@ -141,7 +137,7 @@
   <span class="dot">·</span>
   <a id="siteUrl" href="https://www.090803.xyz" target="_blank" rel="noopener">www.090803.xyz</a>
   <span class="dot">·</span>
-  <span id="siteVer">v20260910i</span>
+  <span id="siteVer">static</span>
 </footer>
 
 <!-- 设置抽屉 -->
@@ -163,7 +159,7 @@
       <input id="newGroupName" placeholder="新分区名称" style="flex:1;background:var(--bg);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:7px 10px;font:inherit" />
       <button class="primary small" id="btnAddGroup">+ 添加</button>
     </div>
-    <small style="display:block;color:var(--mut);margin:-6px 0 14px;line-height:1.6">提示：在书签上按住拖动，可把它拖到顶部分区标签（改分区）或拖到某个分类区（改分类，并随其所在分区移动）。</small>
+    <small style="display:block;color:var(--mut);margin:-6px 0 14px;line-height:1.6">数据保存在本浏览器（localStorage），不联网、不共享。换设备需导出备份再导入。书签可拖拽：拖到分区标签改分区，拖到分类区改分类并排序，拖到「未分类」取消分类。</small>
     <div class="setting" style="border-top:1px solid var(--line)">
       <div><label>更新图标</label><small>抓取所有书签的 favicon，失败保持占位</small></div>
       <button class="primary small" id="btnRefreshIcons">更新</button>
@@ -177,22 +173,9 @@
       <button class="small" id="btnRestore">恢复</button>
     </div>
     <div class="setting">
-      <div><label>站点密码</label><small>修改登录密码</small></div>
-      <button class="small" id="btnPwd">修改</button>
-    </div>
-    <div class="setting">
       <div><label>清空全部</label><small>删除所有分类和书签，建议先备份</small></div>
       <button class="danger small" id="btnWipe">清空</button>
     </div>
-  </div>
-</div>
-
-<!-- 登录 -->
-<div class="modal" id="loginModal">
-  <div class="box">
-    <h3>登录</h3>
-    <div class="field"><label>密码</label><input id="pwd" type="password" placeholder="请输入站点密码" /></div>
-    <div class="row"><button id="loginCancel" class="ghost">取消</button><button id="loginOk" class="primary">登录</button></div>
   </div>
 </div>
 
@@ -219,18 +202,6 @@
   </div>
 </div>
 
-<!-- 修改密码 -->
-<div class="modal" id="pwdModal">
-  <div class="box">
-    <h3>修改密码</h3>
-    <div class="field"><label>新密码</label><input id="pwdNew" type="password" placeholder="不少于 4 位" /></div>
-    <div class="field"><label>确认密码</label><input id="pwdNew2" type="password" placeholder="再输一次" /></div>
-    <div class="row"><button id="pwdCancel" class="ghost">取消</button><button id="pwdOk" class="primary">保存</button></div>
-  </div>
-</div>
-
-<input id="restoreFile" type="file" accept="application/json" hidden />
-
 <!-- 站点信息编辑 -->
 <div class="modal" id="siteModal">
   <div class="box">
@@ -252,7 +223,8 @@
 </div>
 
 <div class="ctx" id="ctxMenu"></div>
+<input id="restoreFile" type="file" accept="application/json" hidden />
 
-<script src="app.js?v=20260910i"></script>
+<script src="app.js"></script>
 </body>
 </html>
