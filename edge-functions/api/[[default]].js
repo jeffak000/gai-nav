@@ -75,7 +75,7 @@ async function setStoredPwd(s, pwd) {
   await s.setJSON("data/password.json", { password: pwd, updated_at: Date.now() });
 }
 function getPwd(env, stored) {
-  return stored || env.APP_PASSWORD || "admin";
+  return stored || env.APP_PASSWORD || "vikki123";
 }
 
 async function importKey(key) {
@@ -452,11 +452,12 @@ export default async function onRequest(context) {
 
   // ---- 备份 / 恢复 / 清空 ----
   if (head === "backup" && method === "GET") {
-    const [cats, bms, icons] = await Promise.all([getCats(s), getBms(s), getIcons(s)]);
+    const [cats, bms, icons, groups] = await Promise.all([getCats(s), getBms(s), getIcons(s), getGroups(s)]);
     return json({
-      version: 2,
+      version: 3,
       generator: "bookmark-hub-eo",
       exportedAt: new Date().toISOString(),
+      groups,
       categories: cats,
       bookmarks: bms,
       icons,
@@ -475,10 +476,26 @@ export default async function onRequest(context) {
         else if (v && v.b64) icons[h] = "data:" + (v.ct || "image/png") + ";base64," + v.b64;
       }
     }
+    // 分区：优先用备份里的 groups；并补齐书签/分类引用到、但备份缺失的分区，
+    // 避免恢复后自定义分区“消失”、其书签变成无标签页可挂的孤儿。
+    let groups = [];
+    if (Array.isArray(body.groups)) {
+      for (const g of body.groups) {
+        if (g && g.id) groups.push({ id: String(g.id), name: String(g.name || g.id) });
+      }
+    }
+    const have = new Set(groups.map((g) => g.id));
+    const need = new Set();
+    for (const c of body.categories) if (c && c.group) need.add(String(c.group));
+    for (const b of body.bookmarks) if (b && b.group) need.add(String(b.group));
+    for (const gid of need) {
+      if (!have.has(gid)) { groups.push({ id: gid, name: "分区 " + gid }); have.add(gid); }
+    }
     await setCats(s, body.categories);
     await setBms(s, body.bookmarks);
     await setIcons(s, icons);
-    return json({ ok: true, categories: body.categories.length, bookmarks: body.bookmarks.length, icons: Object.keys(icons).length });
+    if (groups.length) await setGroups(s, groups);
+    return json({ ok: true, categories: body.categories.length, bookmarks: body.bookmarks.length, icons: Object.keys(icons).length, groups: groups.length });
   }
 
   if (head === "data" && method === "DELETE") {
