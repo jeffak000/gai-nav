@@ -1,33 +1,30 @@
-// 书签中心前端（EdgeOne Makers 同源版）
-const API = "";
-let TOKEN = localStorage.getItem("bm_token") || "";
+// gai溜子导航站 —— 纯前端静态版（数据存浏览器 localStorage，无后端）
+const VERSION = "20260910-static";
+const LS = { groups: "bm_groups", cats: "bm_cats", bms: "bm_bms", icons: "bm_icons", site: "bm_site" };
+
 let CATS = [];
 let BMS = [];
 let ICONS = {};
 let GROUPS = [{ id: "personal", name: "个人区" }, { id: "work", name: "工作区" }];
 let SITE = { name: "gai溜子导航站", author: "gai溜子到处跑", url: "www.090803.xyz" };
-const VERSION = "20260910i";
 let GROUP = localStorage.getItem("bm_group") || "personal";
 let ACTIVE_CAT = "all";
-let DRAG_BM = null; // 当前被拖拽的书签
-let DRAG_CAT = null; // 当前被拖拽的分类
+let DRAG_BM = null;
+let DRAG_CAT = null;
+
 function clearDropHints() {
   document.querySelectorAll(".drop-ok, .drop-before, .drop-after").forEach((n) => n.classList.remove("drop-ok", "drop-before", "drop-after"));
 }
-
-function hostOf(url) {
-  try { return new URL(url).host; } catch { return ""; }
-}
 function el(id) { return document.getElementById(id); }
-function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, (m) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[m])); }
-
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[m])); }
+function hostOf(url) { try { return new URL(url).host; } catch { return ""; } }
+function uid() { return (crypto.randomUUID ? crypto.randomUUID() : "id" + Date.now() + Math.random().toString(36).slice(2)); }
 function toast(msg) {
   let t = document.querySelector(".toast");
   if (!t) { t = document.createElement("div"); t.className = "toast"; document.body.appendChild(t); }
   t.textContent = msg; t.classList.add("show");
   clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("show"), 2200);
 }
-
 function letterIconSvg(host) {
   const ch = (host || "?").charAt(0).toUpperCase();
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18"><rect width="18" height="18" rx="4" fill="#4b5563"/><text x="9" y="13" font-size="12" text-anchor="middle" fill="#fff" font-family="sans-serif">${ch}</text></svg>`;
@@ -35,53 +32,75 @@ function letterIconSvg(host) {
 }
 function iconSrc(host) { return ICONS[host] || letterIconSvg(host); }
 
-async function callApi(path, opts = {}) {
-  const headers = Object.assign({}, opts.headers || {});
-  if (TOKEN) headers["Authorization"] = "Bearer " + TOKEN;
-  if (opts.body && !(opts.body instanceof FormData)) headers["Content-Type"] = "application/json";
-  const res = await fetch(API + "/api" + path, Object.assign({}, opts, { headers }));
-  if (res.status === 401) {
-    TOKEN = ""; localStorage.removeItem("bm_token"); updateLoginBtn();
-    openLogin(); throw new Error("unauthorized");
+// ---------------- 本地存储层 ----------------
+function parse(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } }
+function load() {
+  const g = parse(LS.groups);
+  GROUPS = Array.isArray(g) && g.length ? g : [{ id: "personal", name: "个人区" }, { id: "work", name: "工作区" }];
+  CATS = parse(LS.cats) || [];
+  BMS = parse(LS.bms) || [];
+  ICONS = parse(LS.icons) || {};
+  const s = parse(LS.site);
+  SITE = s && s.name ? s : { name: "gai溜子导航站", author: "gai溜子到处跑", url: "www.090803.xyz" };
+}
+function persist() {
+  localStorage.setItem(LS.groups, JSON.stringify(GROUPS));
+  localStorage.setItem(LS.cats, JSON.stringify(CATS));
+  localStorage.setItem(LS.bms, JSON.stringify(BMS));
+  localStorage.setItem(LS.icons, JSON.stringify(ICONS));
+  localStorage.setItem(LS.site, JSON.stringify(SITE));
+}
+function nextSort(arr) { return arr.length ? Math.max.apply(null, arr.map((x) => x.sort || 0)) + 1 : 0; }
+function needAuth() { return Promise.resolve(); } // 静态版无需登录
+
+// ---------------- 图标抓取（仅新增/刷新时联网，打开只读本地）----------------
+function blobToDataUrl(blob) {
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(fr.result);
+    fr.onerror = rej;
+    fr.readAsDataURL(blob);
+  });
+}
+async function fetchIcon(host) {
+  if (!host) return null;
+  const urls = [
+    "https://logo.clearbit.com/" + host,
+    "https://icons.duckduckgo.com/ip3/" + host + ".ico",
+    "https://www.google.com/s2/favicons?domain=" + host + "&sz=64",
+  ];
+  for (const u of urls) {
+    try {
+      const r = await fetch(u, { mode: "cors" });
+      if (!r.ok) continue;
+      const b = await r.blob();
+      if (!b || !b.type.startsWith("image/") || b.size < 64) continue;
+      return await blobToDataUrl(b);
+    } catch {}
   }
-  return res;
+  return null;
+}
+function refreshIconFor(host) {
+  if (!host || ICONS[host]) return;
+  fetchIcon(host).then((d) => { if (d) { ICONS[host] = d; persist(); renderMain(); } });
 }
 
-function updateLoginBtn() {
-  el("btnLogin").textContent = TOKEN ? "退出" : "登录";
-  el("btnLogin").className = TOKEN ? "ghost" : "primary";
-}
-
-async function loadData() {
-  try {
-    const [rg, rc, rb, ri, rs] = await Promise.all([
-      callApi("/groups"), callApi("/categories"), callApi("/bookmarks"), callApi("/icons"), callApi("/site"),
-    ]);
-    GROUPS = await rg.json();
-    CATS = await rc.json();
-    BMS = await rb.json();
-    ICONS = await ri.json();
-    try { SITE = await rs.json(); } catch {}
-    if (!GROUPS.find((g) => g.id === GROUP)) GROUP = GROUPS[0] ? GROUPS[0].id : "personal";
-    render();
-    renderSite();
-  } catch (e) { if (e.message !== "unauthorized") toast("加载失败：" + e.message); }
-}
-
+// ---------------- 业务数据 ----------------
 function groupName(id) { const g = GROUPS.find((x) => x.id === id); return g ? g.name : "个人区"; }
 function sortedCats() { return [...CATS].sort((a, b) => (a.sort || 0) - (b.sort || 0)); }
 function sortedBms() { return [...BMS].sort((a, b) => (a.sort || 0) - (b.sort || 0)); }
 function bmsOfCat(cid) { return sortedBms().filter((b) => b.category_id === cid && b.group === GROUP); }
 function bmCount(cid) { return BMS.filter((b) => b.category_id === cid && b.group === GROUP).length; }
-function bmsOfUncat() { return groupBms().filter((b) => !b.category_id); }
 function groupBms() { return sortedBms().filter((b) => b.group === GROUP); }
 function groupCats() { return sortedCats().filter((c) => c.group === GROUP); }
 
-function render() {
-  renderTabs();
-  renderCatNav();
-  renderMain();
+function loadData() {
+  load();
+  if (!GROUPS.find((g) => g.id === GROUP)) GROUP = GROUPS[0] ? GROUPS[0].id : "personal";
+  render(); renderSite();
 }
+
+function render() { renderTabs(); renderCatNav(); renderMain(); }
 
 function renderSite() {
   const name = SITE.name || "我的导航站";
@@ -148,12 +167,10 @@ function renderMain() {
     c.appendChild(section(cat.name, items.length, items, cat));
     return;
   }
-
   if (!gbms.length && !groupCats().length) {
     c.innerHTML = `<div class="empty">当前分区还没有内容，点击「+ 书签」或「+ 新建分类」开始添加。</div>`;
     return;
   }
-
   for (const cat of groupCats()) {
     const items = bmsOfCat(cat.id);
     c.appendChild(section(cat.name, items.length, items, cat));
@@ -183,8 +200,7 @@ function bmItem(b) {
   d.title = `${esc(b.title)}\n${esc(b.url)}${b.note ? "\n" + esc(b.note) : ""}`;
   d.innerHTML = `<img src="${iconSrc(h)}" alt=""/><span class="t">${esc(b.title || b.url)}</span>`;
   d.addEventListener("dragstart", (e) => {
-    DRAG_BM = b;
-    e.dataTransfer.effectAllowed = "move";
+    DRAG_BM = b; e.dataTransfer.effectAllowed = "move";
     try { e.dataTransfer.setData("text/plain", b.id); } catch {}
     d.classList.add("dragging");
   });
@@ -193,12 +209,9 @@ function bmItem(b) {
 }
 
 // ---------------- 右键菜单 ----------------
-// items 支持：{label, onClick, danger} 普通项；{label, submenu:[...]} 子菜单；{sep:true} 分隔线
 function showCtx(x, y, items) {
   const m = el("ctxMenu");
-  m.innerHTML = "";
-  fillCtx(m, items);
-  m.classList.add("show");
+  m.innerHTML = ""; fillCtx(m, items); m.classList.add("show");
   const r = m.getBoundingClientRect();
   m.style.left = Math.min(x, window.innerWidth - r.width - 8) + "px";
   m.style.top = Math.min(y, window.innerHeight - r.height - 8) + "px";
@@ -212,13 +225,8 @@ function fillCtx(m, items) {
     if (it.submenu) {
       d.addEventListener("mouseenter", () => {
         m.querySelectorAll(".ctx-sub").forEach((n) => n.remove());
-        const sub = document.createElement("div");
-        sub.className = "ctx ctx-sub";
-        fillCtx(sub, it.submenu);
-        m.appendChild(sub);
-        const dr = d.getBoundingClientRect();
-        sub.style.left = (dr.right - 4) + "px";
-        sub.style.top = dr.top + "px";
+        const sub = document.createElement("div"); sub.className = "ctx ctx-sub"; fillCtx(sub, it.submenu); m.appendChild(sub);
+        const dr = d.getBoundingClientRect(); sub.style.left = (dr.right - 4) + "px"; sub.style.top = dr.top + "px";
         const sr = sub.getBoundingClientRect();
         if (sr.right > window.innerWidth - 8) sub.style.left = (dr.left - sr.width + 4) + "px";
         if (sr.bottom > window.innerHeight - 8) sub.style.top = (window.innerHeight - sr.height - 8) + "px";
@@ -230,7 +238,6 @@ function fillCtx(m, items) {
   }
 }
 function hideCtx() { el("ctxMenu").classList.remove("show"); }
-
 document.addEventListener("click", hideCtx);
 document.addEventListener("scroll", hideCtx, true);
 
@@ -251,42 +258,30 @@ el("catList").addEventListener("contextmenu", (e) => {
   if (!cat || cat.dataset.virtual) return;
   e.preventDefault();
   const c = cat._cat;
-  const groupItems = GROUPS.map((g) => ({
-    label: (g.id === c.group ? "✓ " : "") + g.name,
-    onClick: () => moveCatToGroup(c, g.id),
-  }));
+  const groupItems = GROUPS.map((g) => ({ label: (g.id === c.group ? "✓ " : "") + g.name, onClick: () => moveCatToGroup(c, g.id) }));
   showCtx(e.clientX, e.clientY, [
     { label: "编辑", onClick: () => editCat(c) },
     { label: "移动到分区", submenu: groupItems },
     { label: "删除", danger: true, onClick: () => delCat(c) },
   ]);
 });
-// 左键点击书签仍打开链接
 el("content").addEventListener("click", (e) => {
   const item = e.target.closest(".item");
   if (item && item._bm) window.open(item._bm.url, "_blank");
 });
 
-// ---------------- 拖拽：书签 & 分类 ----------------
-// 书签：
-//   拖到分区标签   -> 改 group（归入该分区「未分类」）
-//   拖到分类区/书签 -> 改 category_id + group，并按落点插入排序（移动位置）
-//   拖到「未分类」区 -> 取消分类、留当前分区，并按落点排序
-// 分类（左侧列表）：
-//   拖到分区标签   -> 改 group（整组搬家，书签级联跟随）
-//   在列表内拖动   -> 改 sort（调整分类显示顺序）
+// ---------------- 拖拽 ----------------
 function insertSort(filtered, idx) {
   if (!filtered.length) return 0;
   if (idx <= 0) return filtered[0].sort - 1;
   if (idx >= filtered.length) return filtered[filtered.length - 1].sort + 1;
   return (filtered[idx - 1].sort + filtered[idx].sort) / 2;
 }
-
 el("groupTabs").addEventListener("dragover", (e) => {
   const b = e.target.closest("button[data-g]");
   if (b && (DRAG_BM || DRAG_CAT)) { e.preventDefault(); clearDropHints(); b.classList.add("drop-ok"); }
 });
-el("groupTabs").addEventListener("drop", async (e) => {
+el("groupTabs").addEventListener("drop", (e) => {
   const b = e.target.closest("button[data-g]");
   if (!b) return;
   if (DRAG_BM) {
@@ -294,12 +289,12 @@ el("groupTabs").addEventListener("drop", async (e) => {
   } else if (DRAG_CAT) {
     e.preventDefault(); b.classList.remove("drop-ok");
     if (DRAG_CAT.group === b.dataset.g) { toast("已在该分区"); return; }
-    await needAuth();
-    const r = await callApi("/categories/" + DRAG_CAT.id, { method: "PUT", body: JSON.stringify({ group: b.dataset.g }) });
-    if (r.ok) { toast("已移动到「" + groupName(b.dataset.g) + "」"); await loadData(); renderGroupManage(); } else toast("移动失败");
+    DRAG_CAT.group = b.dataset.g;
+    // 级联：分类下书签跟随分区
+    for (const bm of BMS) if (bm.category_id === DRAG_CAT.id) bm.group = b.dataset.g;
+    persist(); toast("已移动到「" + groupName(b.dataset.g) + "」"); loadData(); renderGroupManage();
   }
 });
-
 el("content").addEventListener("dragover", (e) => {
   if (!DRAG_BM) return;
   const sec = e.target.closest(".sec");
@@ -316,7 +311,7 @@ el("content").addEventListener("drop", (e) => {
   const sec = e.target.closest(".sec");
   if (!sec) return;
   e.preventDefault(); clearDropHints();
-  const cat = sec._cat; // null = 未分类
+  const cat = sec._cat;
   const list = sortedBms().filter((b) => cat ? (b.category_id === cat.id && b.group === cat.group) : (!b.category_id && b.group === GROUP));
   const filtered = list.filter((b) => b.id !== DRAG_BM.id);
   const item = e.target.closest(".item");
@@ -329,8 +324,6 @@ el("content").addEventListener("drop", (e) => {
   }
   applyMove(DRAG_BM, { category_id: cat ? cat.id : null, group: cat ? cat.group : GROUP, sort: insertSort(filtered, idx) });
 });
-
-// 左侧分类列表：拖动分类改顺序 / 拖到分区标签搬家
 el("catList").addEventListener("dragover", (e) => {
   if (!DRAG_CAT) return;
   const c = e.target.closest(".cat");
@@ -339,7 +332,7 @@ el("catList").addEventListener("dragover", (e) => {
   const r = c.getBoundingClientRect();
   c.classList.add((e.clientY - r.top) < r.height / 2 ? "drop-before" : "drop-after");
 });
-el("catList").addEventListener("drop", async (e) => {
+el("catList").addEventListener("drop", (e) => {
   if (!DRAG_CAT) return;
   const c = e.target.closest(".cat");
   if (!c || c.dataset.virtual) return;
@@ -351,49 +344,42 @@ el("catList").addEventListener("drop", async (e) => {
   const before = (e.clientY - r.top) < r.height / 2;
   const i = list.findIndex((x) => x.id === target.id);
   const idx = i >= 0 ? (before ? i : i + 1) : list.length;
-  await needAuth();
-  const rr = await callApi("/categories/" + DRAG_CAT.id, { method: "PUT", body: JSON.stringify({ sort: insertSort(list, idx) }) });
-  if (rr.ok) { toast("已调整顺序"); await loadData(); } else toast("排序失败");
+  DRAG_CAT.sort = insertSort(list, idx);
+  persist(); toast("已调整顺序"); loadData();
 });
 
 async function moveToGroup(bm, groupId) {
   if (bm.group === groupId) { toast("已在「" + groupName(groupId) + "」"); return; }
-  await needAuth();
-  const r = await callApi("/bookmarks/" + bm.id, { method: "PUT", body: JSON.stringify({ group: groupId, category_id: null }) });
-  if (r.ok) { toast("已移动到「" + groupName(groupId) + "」"); await loadData(); } else toast("移动失败");
+  bm.group = groupId; bm.category_id = null;
+  persist(); toast("已移动到「" + groupName(groupId) + "」"); loadData();
 }
 async function moveCatToGroup(c, groupId) {
   if (c.group === groupId) { toast("已在「" + groupName(groupId) + "」"); return; }
-  await needAuth();
-  const r = await callApi("/categories/" + c.id, { method: "PUT", body: JSON.stringify({ group: groupId }) });
-  if (r.ok) { toast("已移动到「" + groupName(groupId) + "」"); await loadData(); renderGroupManage(); } else toast("移动失败");
+  c.group = groupId;
+  for (const bm of BMS) if (bm.category_id === c.id) bm.group = groupId;
+  persist(); toast("已移动到「" + groupName(groupId) + "」"); loadData(); renderGroupManage();
 }
 async function applyMove(bm, patch) {
-  await needAuth();
-  const r = await callApi("/bookmarks/" + bm.id, { method: "PUT", body: JSON.stringify(patch) });
-  if (r.ok) { toast("已更新"); await loadData(); } else toast("移动失败");
+  Object.assign(bm, patch);
+  persist(); toast("已更新"); loadData();
 }
 
 // ---------------- 分类 ----------------
 function addCat() {
   el("catTitle").textContent = "新建分类";
-  el("catName").value = "";
-  fillGroupSelect("catGroup", GROUP);
-  el("catModal")._id = null;
-  show("catModal"); el("catName").focus();
+  el("catName").value = ""; fillGroupSelect("catGroup", GROUP);
+  el("catModal")._id = null; show("catModal"); el("catName").focus();
 }
 function editCat(c) {
   el("catTitle").textContent = "编辑分类";
-  el("catName").value = c.name;
-  fillGroupSelect("catGroup", c.group || "personal");
-  el("catModal")._id = c.id;
-  show("catModal"); el("catName").focus();
+  el("catName").value = c.name; fillGroupSelect("catGroup", c.group || "personal");
+  el("catModal")._id = c.id; show("catModal"); el("catName").focus();
 }
-async function delCat(c) {
+function delCat(c) {
   if (!confirm(`删除分类「${c.name}」及其下 ${bmCount(c.id)} 个书签？`)) return;
-  await needAuth();
-  const r = await callApi("/categories/" + c.id, { method: "DELETE" });
-  if (r.ok) { toast("已删除"); if (ACTIVE_CAT === c.id) ACTIVE_CAT = "all"; await loadData(); } else toast("删除失败");
+  CATS = CATS.filter((x) => x.id !== c.id);
+  BMS = BMS.filter((b) => b.category_id !== c.id);
+  persist(); toast("已删除"); if (ACTIVE_CAT === c.id) ACTIVE_CAT = "all"; loadData();
 }
 
 // ---------------- 书签 ----------------
@@ -417,82 +403,58 @@ function fillGroupSelect(selId, val) {
   const s = el(selId); s.innerHTML = "";
   for (const g of GROUPS) s.insertAdjacentHTML("beforeend", `<option value="${g.id}"${g.id === val ? " selected" : ""}>${esc(g.name)}</option>`);
 }
-async function delBm(b) {
+function delBm(b) {
   if (!confirm(`删除书签「${b.title || b.url}」？`)) return;
-  await needAuth();
-  const r = await callApi("/bookmarks/" + b.id, { method: "DELETE" });
-  if (r.ok) { toast("已删除"); await loadData(); } else toast("删除失败");
+  BMS = BMS.filter((x) => x.id !== b.id);
+  persist(); toast("已删除"); loadData();
 }
 async function refreshBmIcon(b) {
   const h = hostOf(b.url); if (!h) return;
-  await needAuth();
   toast("正在刷新图标…");
-  const r = await callApi("/icons/refresh", { method: "POST", body: JSON.stringify({ host: h }) });
-  if (r.ok) {
-    const x = await r.json();
-    toast(x.hasIcon ? "图标已更新" : "未获取到，已用占位图");
-    await loadData();
-  } else toast("刷新失败");
+  const d = await fetchIcon(h);
+  if (d) { ICONS[h] = d; persist(); toast("图标已更新"); }
+  else toast("未获取到，已用占位图");
+  loadData();
 }
 
-// ---------------- 鉴权 ----------------
+// ---------------- 鉴权（静态版无后端，占位）----------------
 function show(id) { el(id).classList.add("show"); }
 function hide(id) { el(id).classList.remove("show"); }
-function openLogin() { el("pwd").value = ""; show("loginModal"); el("pwd").focus(); }
-async function needAuth() {
-  if (TOKEN) return;
-  openLogin();
-  return new Promise((resolve) => { el("loginModal")._resolve = resolve; });
-}
-el("btnLogin").onclick = () => {
-  if (TOKEN) { TOKEN = ""; localStorage.removeItem("bm_token"); updateLoginBtn(); toast("已退出"); }
-  else openLogin();
-};
-el("loginCancel").onclick = () => { hide("loginModal"); resolveLogin(false); };
-el("loginOk").onclick = async () => {
-  const r = await callApi("/login", { method: "POST", body: JSON.stringify({ password: el("pwd").value }) });
-  if (r.ok) {
-    const j = await r.json(); TOKEN = j.token; localStorage.setItem("bm_token", TOKEN); updateLoginBtn(); hide("loginModal"); toast("登录成功"); resolveLogin(true);
-  } else { toast("密码错误"); resolveLogin(false); }
-};
-el("pwd").addEventListener("keydown", (e) => { if (e.key === "Enter") el("loginOk").click(); });
-function resolveLogin(ok) {
-  const r = el("loginModal")._resolve;
-  el("loginModal")._resolve = null;
-  if (r) r(ok);
-}
 
 // ---------------- 分类 / 书签 保存 ----------------
 el("catCancel").onclick = () => hide("catModal");
-el("catSave").onclick = async () => {
-  await needAuth();
+el("catSave").onclick = () => {
   const name = el("catName").value.trim(); if (!name) return toast("请输入名称");
-  const payload = { name, group: el("catGroup").value };
+  const group = el("catGroup").value;
   const id = el("catModal")._id;
-  const r = id ? await callApi("/categories/" + id, { method: "PUT", body: JSON.stringify(payload) })
-               : await callApi("/categories", { method: "POST", body: JSON.stringify(payload) });
-  if (r.ok) { hide("catModal"); await loadData(); } else toast("保存失败");
+  if (id) {
+    const c = CATS.find((x) => x.id === id); if (c) { c.name = name; c.group = group; }
+  } else {
+    CATS.push({ id: uid(), name, group, sort: nextSort(CATS) });
+  }
+  persist(); hide("catModal"); loadData();
 };
 
 el("bmCancel").onclick = () => hide("bmModal");
-el("bmSave").onclick = async () => {
-  await needAuth();
+el("bmSave").onclick = () => {
   const url = el("bmUrl").value.trim(); if (!url) return toast("请输入 URL");
   const payload = {
     title: el("bmTitle_in").value.trim() || url,
     url,
     category_id: el("bmCat").value || null,
     group: el("bmGroup").value,
-    note: el("bmNote").value.trim() || null
+    note: el("bmNote").value.trim() || null,
   };
   const id = el("bmModal")._id;
-  const r = id ? await callApi("/bookmarks/" + id, { method: "PUT", body: JSON.stringify(payload) })
-               : await callApi("/bookmarks", { method: "POST", body: JSON.stringify(payload) });
-  if (r.ok) {
-    hide("bmModal");
-    await loadData();
-    setTimeout(async () => { try { const ri = await callApi("/icons"); ICONS = await ri.json(); render(); } catch {} }, 2500);
-  } else toast("保存失败");
+  if (id) {
+    const b = BMS.find((x) => x.id === id);
+    if (b) Object.assign(b, payload);
+  } else {
+    const b = Object.assign({ id: uid(), sort: nextSort(BMS) }, payload);
+    BMS.push(b);
+  }
+  persist(); hide("bmModal"); loadData();
+  refreshIconFor(hostOf(url));
 };
 
 // ---------------- 设置抽屉 ----------------
@@ -501,7 +463,7 @@ el("btnCloseSettings").onclick = () => hide("settingsDrawer");
 el("settingsDrawer").onclick = (e) => { if (e.target === el("settingsDrawer")) hide("settingsDrawer"); };
 el("btnAddBm").onclick = addBm;
 
-// ---------------- 站点信息（首页展示，可在设置里修改） ----------------
+// ---------------- 站点信息 ----------------
 el("btnEditSite").onclick = () => {
   el("siteNameIn").value = SITE.name || "";
   el("siteAuthorIn").value = SITE.author || "";
@@ -509,16 +471,13 @@ el("btnEditSite").onclick = () => {
   show("siteModal");
 };
 el("siteCancel").onclick = () => hide("siteModal");
-el("siteSave").onclick = async () => {
-  await needAuth();
-  const payload = {
+el("siteSave").onclick = () => {
+  SITE = {
     name: el("siteNameIn").value.trim() || "我的导航站",
     author: el("siteAuthorIn").value.trim(),
     url: el("siteUrlIn").value.trim(),
   };
-  const r = await callApi("/site", { method: "PUT", body: JSON.stringify(payload) });
-  if (r.ok) { SITE = await r.json(); hide("siteModal"); renderSite(); toast("已保存站点信息"); }
-  else toast("保存失败");
+  persist(); hide("siteModal"); renderSite(); toast("已保存站点信息");
 };
 
 function renderGroupManage() {
@@ -527,93 +486,77 @@ function renderGroupManage() {
     const row = document.createElement("div"); row.className = "grp-row";
     row.innerHTML = `<span class="grp-name">${esc(g.name)}</span>`;
     const ren = document.createElement("button");
-    ren.className = "small"; ren.textContent = "重命名";
-    ren.onclick = () => renameGroup(g);
+    ren.className = "small"; ren.textContent = "重命名"; ren.onclick = () => renameGroup(g);
     const del = document.createElement("button");
     del.className = "danger small"; del.textContent = "删除";
-    del.onclick = async () => {
+    del.onclick = () => {
       if (GROUPS.length <= 1) return toast("至少保留一个分区");
-      if (!confirm(`删除分区「${g.name}」？其下分类和书签会移到「${groupName(GROUPS.find((x) => x.id !== g.id).id)}」`)) return;
-      await needAuth();
-      const r = await callApi("/groups/" + g.id, { method: "DELETE" });
-      if (r.ok) { const j = await r.json(); if (GROUP === g.id) GROUP = j.fallback; localStorage.setItem("bm_group", GROUP); toast("已删除分区"); await loadData(); renderGroupManage(); }
-      else toast("删除失败");
+      const fallback = GROUPS.find((x) => x.id !== g.id).id;
+      if (!confirm(`删除分区「${g.name}」？其下分类和书签会移到「${groupName(fallback)}」`)) return;
+      GROUPS = GROUPS.filter((x) => x.id !== g.id);
+      for (const c of CATS) if (c.group === g.id) c.group = fallback;
+      for (const b of BMS) if (b.group === g.id) b.group = fallback;
+      if (GROUP === g.id) { GROUP = fallback; localStorage.setItem("bm_group", GROUP); }
+      persist(); toast("已删除分区"); loadData(); renderGroupManage();
     };
-    row.appendChild(ren);
-    row.appendChild(del);
+    row.appendChild(ren); row.appendChild(del);
     box.appendChild(row);
   }
 }
-el("btnAddGroup").onclick = async () => {
+el("btnAddGroup").onclick = () => {
   const name = el("newGroupName").value.trim(); if (!name) return toast("请输入分区名");
-  await needAuth();
-  const r = await callApi("/groups", { method: "POST", body: JSON.stringify({ name }) });
-  if (r.ok) { el("newGroupName").value = ""; toast("已添加分区"); await loadData(); renderGroupManage(); }
-  else { const j = await r.json().catch(() => ({})); toast(j.error || "添加失败"); }
+  GROUPS.push({ id: uid(), name });
+  persist(); el("newGroupName").value = ""; toast("已添加分区"); loadData(); renderGroupManage();
 };
 function renameGroup(g) {
   el("grpTitle").textContent = "重命名分区";
   el("grpName").value = g.name;
-  el("grpModal")._id = g.id;
-  show("grpModal"); el("grpName").focus();
+  el("grpModal")._id = g.id; show("grpModal"); el("grpName").focus();
 }
 el("grpCancel").onclick = () => hide("grpModal");
-el("grpSave").onclick = async () => {
-  await needAuth();
+el("grpSave").onclick = () => {
   const name = el("grpName").value.trim(); if (!name) return toast("请输入名称");
-  const id = el("grpModal")._id;
-  const r = await callApi("/groups/" + id, { method: "PUT", body: JSON.stringify({ name }) });
-  if (r.ok) { hide("grpModal"); toast("已重命名"); await loadData(); renderGroupManage(); }
-  else toast("保存失败");
+  const g = GROUPS.find((x) => x.id === el("grpModal")._id);
+  if (g) g.name = name;
+  persist(); hide("grpModal"); toast("已重命名"); loadData(); renderGroupManage();
 };
 el("grpName").addEventListener("keydown", (e) => { if (e.key === "Enter") el("grpSave").click(); });
 
-el("btnBackup").onclick = async () => {
-  await needAuth();
-  const r = await callApi("/backup");
-  if (!r.ok) return toast("备份失败");
-  const j = await r.json();
+el("btnBackup").onclick = () => {
+  const j = { groups: GROUPS, categories: CATS, bookmarks: BMS, icons: ICONS, site: SITE };
   const blob = new Blob([JSON.stringify(j, null, 2)], { type: "application/json" });
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
   a.download = "bookmarks-" + new Date().toISOString().slice(0, 10) + ".json"; a.click();
   toast("已下载备份");
 };
 el("btnRestore").onclick = () => el("restoreFile").click();
-el("restoreFile").onchange = async (e) => {
+el("restoreFile").onchange = (e) => {
   const f = e.target.files[0]; if (!f) return;
-  await needAuth();
-  const text = await f.text();
-  let j; try { j = JSON.parse(text); } catch { return toast("JSON 解析失败"); }
-  const r = await callApi("/restore", { method: "POST", body: JSON.stringify(j) });
-  if (r.ok) { const x = await r.json(); toast(`恢复完成：分类 ${x.categories} / 书签 ${x.bookmarks} / 图标 ${x.icons}`); await loadData(); }
-  else toast("恢复失败");
-  e.target.value = "";
+  f.text().then((text) => {
+    let j; try { j = JSON.parse(text); } catch { return toast("JSON 解析失败"); }
+    if (Array.isArray(j.groups)) GROUPS = j.groups;
+    if (Array.isArray(j.categories)) CATS = j.categories;
+    if (Array.isArray(j.bookmarks)) BMS = j.bookmarks;
+    if (j.icons) ICONS = j.icons;
+    if (j.site) SITE = j.site;
+    persist(); toast(`恢复完成：分类 ${CATS.length} / 书签 ${BMS.length} / 图标 ${Object.keys(ICONS).length}`); loadData();
+    e.target.value = "";
+  });
 };
-el("btnWipe").onclick = async () => {
+el("btnWipe").onclick = () => {
   if (!confirm("确定清空全部分类和书签？此操作不可恢复，建议先备份！")) return;
-  await needAuth();
-  const r = await callApi("/data", { method: "DELETE" });
-  if (r.ok) { toast("已清空"); ACTIVE_CAT = "all"; await loadData(); } else toast("清空失败");
+  CATS = []; BMS = []; ICONS = {}; persist(); toast("已清空"); ACTIVE_CAT = "all"; loadData();
 };
 el("btnRefreshIcons").onclick = async () => {
-  await needAuth();
+  const hosts = [...new Set(BMS.map((b) => hostOf(b.url)).filter(Boolean))];
   toast("正在更新图标…");
-  const r = await callApi("/icons/refresh", { method: "POST" });
-  if (r.ok) { const x = await r.json(); toast(`图标更新：${x.cached}/${x.hosts}`); await loadData(); }
-  else toast("更新失败");
-};
-el("btnPwd").onclick = () => { el("pwdNew").value = ""; el("pwdNew2").value = ""; show("pwdModal"); el("pwdNew").focus(); };
-el("pwdCancel").onclick = () => hide("pwdModal");
-el("pwdOk").onclick = async () => {
-  await needAuth();
-  const p1 = el("pwdNew").value.trim(), p2 = el("pwdNew2").value.trim();
-  if (!p1 || p1.length < 4) return toast("密码至少 4 位");
-  if (p1 !== p2) return toast("两次密码不一致");
-  const r = await callApi("/password", { method: "POST", body: JSON.stringify({ password: p1 }) });
-  if (r.ok) {
-    const j = await r.json(); TOKEN = j.token; localStorage.setItem("bm_token", TOKEN); updateLoginBtn();
-    hide("pwdModal"); toast("密码已修改，请牢记新密码");
-  } else toast("修改失败");
+  let n = 0;
+  for (const h of hosts) {
+    if (ICONS[h]) continue;
+    const d = await fetchIcon(h);
+    if (d) { ICONS[h] = d; n++; }
+  }
+  persist(); toast(`图标更新：${n} 个新增`); loadData();
 };
 
 // ---------------- Tabs ----------------
@@ -630,8 +573,7 @@ el("groupTabs").onclick = (e) => {
   const rz = el("sideResizer");
   rz.addEventListener("mousedown", (e) => {
     e.preventDefault();
-    const startX = e.clientX;
-    const startW = el("catNav").offsetWidth;
+    const startX = e.clientX, startW = el("catNav").offsetWidth;
     function mv(ev) {
       const w = Math.max(120, Math.min(440, startW + ev.clientX - startX));
       el("catNav").style.width = w + "px";
@@ -649,5 +591,4 @@ el("groupTabs").onclick = (e) => {
 })();
 
 // ---------------- 启动 ----------------
-updateLoginBtn();
 loadData();
