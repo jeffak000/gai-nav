@@ -105,3 +105,4 @@ gai-nav/
 ## 📝 License
 
 [MIT](./LICENSE) © gai溜子到处跑
+[![Deploy to EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?repository-url=https%3A%2F%2Fgithub.com%2Fjeffak000%2Fgai-nav&project-name=gai-nav&env=APP_PASSWORD&env-description=%E8%AE%BE%E7%BD%AE%E7%99%BB%E5%BD%95%E5%AF%86%E7%A0%81%EF%BC%88%E9%BB%98%E8%AE%A4%20admin%EF%BC%89)
