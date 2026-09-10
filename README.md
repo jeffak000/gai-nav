@@ -1,14 +1,22 @@
 # gai溜子导航站
 
-一个简洁、紧凑、可自己托管的书签导航站。支持「个人区 / 工作区」等多分区切换，分类与书签可拖拽排序、跨分区移动，图标本地缓存、打开即读不联外网。后端运行在 **腾讯云 EdgeOne Makers**（边缘函数 + Blob 存储），无需自建服务器。
+一个简洁、紧凑、可自己托管的书签导航站。支持「个人区 / 工作区」等多分区切换，分类与书签可拖拽排序、跨分区移动，图标本地缓存、打开即读不联外网。后端同时提供 **腾讯云 EdgeOne Makers**（边缘函数 + Blob 存储）与 **Cloudflare Workers**（Worker + KV 存储）两种部署方式，无需自建服务器。
 
 > 开源发布版**不携带任何书签数据**，首次打开是空的，由你自己添加。
 
 ## 🚀 一键部署
 
-点击按钮，授权 GitHub 仓库后自动部署到 EdgeOne Makers：
+点击按钮，授权 GitHub 仓库后自动部署：
+
+**EdgeOne Makers**
 
 [![Deploy to EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?repository-url=https%3A%2F%2Fgithub.com%2Fjeffak000%2Fgai-nav&project-name=gai-nav&env=APP_PASSWORD&env-description=%E8%AE%BE%E7%BD%AE%E7%99%BB%E5%BD%95%E5%AF%86%E7%A0%81%EF%BC%88%E9%BB%98%E8%AE%A4%20admin%EF%BC%89)
+
+**Cloudflare Workers**
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/jeffak000/gai-nav)
+
+> Cloudflare 部署需先创建 KV 命名空间，详见下方「Cloudflare Workers 部署」。
 
 部署完成后，控制台会提示你设置环境变量 `APP_PASSWORD`（即登录密码，不设置则默认 `admin`，**请务必修改**）。
 
@@ -26,21 +34,24 @@
 ## 🧱 技术栈
 
 - 前端：原生 `index.html` + `app.js`（无框架、无构建步骤）
-- 后端：EdgeOne Makers 边缘函数（单文件 catch-all，`edge-functions/api/[[default]].js` 映射全部 `/api/*`）
-- 存储：EdgeOne Blob 命名空间 `bookmarks`（首次访问自动创建）
+- 后端 A：**EdgeOne Makers** 边缘函数（单文件 catch-all，`edge-functions/api/[[default]].js`） + Blob 存储
+- 后端 B：**Cloudflare Workers**（`worker/index.js`） + KV 存储
 - 鉴权：Web Crypto HMAC-SHA256 签名 Token
 
 ## 📁 目录结构
 
 ```
 gai-nav/
-├─ index.html                      # 前端页面与样式
-├─ app.js                         # 前端逻辑（同源 + Bearer 鉴权）
+├─ index.html                      # 前端页面与样式（两端共用）
+├─ app.js                         # 前端逻辑（同源 + Bearer 鉴权，两端共用）
 ├─ edge-functions/
-│  └─ api/[[default]].js          # 后端：所有 /api/* 路由
+│  └─ api/[[default]].js          # 后端 A：EdgeOne Makers 所有 /api/* 路由
+├─ worker/
+│  └─ index.js                    # 后端 B：Cloudflare Workers 所有 /api/* 路由
+├─ wrangler.toml                  # Cloudflare Workers 配置（KV 绑定 + 静态资源）
 ├─ package.json                   # 声明 @edgeone/pages-blob（平台内置，通常无需 npm install）
 ├─ .env.example                   # 环境变量示例（APP_PASSWORD）
-├─ deploy.sh / deploy.ps1         # 一键部署脚本
+├─ deploy.sh / deploy.ps1         # EdgeOne 一键部署脚本
 └─ LICENSE
 ```
 
@@ -69,6 +80,29 @@ gai-nav/
 2. 新建项目，把本仓库整个文件夹拖拽上传（含 `index.html`、`app.js`、`edge-functions/`）。无需构建命令。
 3. 设置环境变量 `APP_PASSWORD`（同上）。
 4. 首次访问会自动创建 Blob 命名空间 `bookmarks`。
+
+## 🚀 Cloudflare Workers 部署
+
+点上方「Deploy to Cloudflare」按钮会自动 fork 本仓库并用 `wrangler` 部署。由于 Cloudflare 要求 KV 命名空间 id 在部署前就存在，还需一步手动配置：
+
+1. 安装并登录 `wrangler`：`npm i -g wrangler && wrangler login`
+2. 创建 KV 命名空间：
+   ```bash
+   wrangler kv namespace create BOOKMARKS
+   ```
+   复制输出的 `id`（形如 `xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`）。
+3. 打开仓库里的 `wrangler.toml`，把 `REPLACE_WITH_YOUR_BOOKMARKS_KV_ID` 替换成上一步的 id。
+4. 重新部署（按钮部署失败的话，本地执行）：
+   ```bash
+   wrangler deploy
+   ```
+5. 设置登录密码（可选，不设置默认 `admin`）：
+   ```bash
+   wrangler secret put APP_PASSWORD
+   ```
+6. 打开分配的 `*.workers.dev` 域名，点「登录」即可使用。
+
+> 数据与代码分离：书签存放在你自己的 KV 命名空间，仓库本身不含任何数据。
 
 ## 🔑 默认账号
 
@@ -105,4 +139,3 @@ gai-nav/
 ## 📝 License
 
 [MIT](./LICENSE) © gai溜子到处跑
-[![Deploy to EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?repository-url=https%3A%2F%2Fgithub.com%2Fjeffak000%2Fgai-nav&project-name=gai-nav&env=APP_PASSWORD&env-description=%E8%AE%BE%E7%BD%AE%E7%99%BB%E5%BD%95%E5%AF%86%E7%A0%81%EF%BC%88%E9%BB%98%E8%AE%A4%20admin%EF%BC%89)
