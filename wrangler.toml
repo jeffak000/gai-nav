@@ -1,0 +1,18 @@
+name = "gai-nav"
+main = "worker/index.js"
+compatibility_date = "2024-11-01"
+workers_dev = true
+
+# 部署前必须先创建 KV 命名空间，并把下面 id 占位符换成你自己的：
+#   wrangler kv namespace create BOOKMARKS
+# 复制输出的 id 替换 REPLACE_WITH_YOUR_BOOKMARKS_KV_ID
+kv_namespaces = [
+  { binding = "BOOKMARKS", id = "REPLACE_WITH_YOUR_BOOKMARKS_KV_ID" }
+]
+
+# 前端静态资源（index.html / app.js）由 Workers Assets 托管
+assets = { binding = "ASSETS", directory = "./" }
+
+# 默认登录密码（也可在控制台用 `wrangler secret put APP_PASSWORD` 覆盖）
+[vars]
+APP_PASSWORD = "admin"
